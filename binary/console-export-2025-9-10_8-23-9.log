@@ -1,0 +1,36 @@
+[vite] connecting... client:495:9
+[vite] connected. client:614:15
+✨ Nuxt DevTools  Press Shift + Alt + D to open DevTools <empty string> devtools.client.js:52:13
+From auth middleware auth.ts:9:11
+to 
+Object { fullPath: "/", hash: "", query: {}, name: "index", path: "/", params: {}, matched: (1) […], meta: Proxy, redirectedFrom: undefined, href: "/" }
+auth.ts:10:11
+from 
+Object { fullPath: "/", path: "/", query: {}, hash: "", name: undefined, params: {}, matched: (1) […], meta: {…}, redirectedFrom: undefined, href: "/" }
+auth.ts:11:11
+0. userId.value 82985ece-87b8-43d2-b830-70faa270329a auth.ts:15:11
+1. userId.value 82985ece-87b8-43d2-b830-70faa270329a auth.ts:20:11
+loggedIn true auth.ts:22:13
+<Suspense> is an experimental feature and its API will likely change. runtime-core.esm-bundler.js:6994:43
+===>==>=>>=>>> 
+Array(3) [ {…}, {…}, {…} ]
+sidebarItem.ts:236:9
+Session id: 82985ece-87b8-43d2-b830-70faa270329a Session email: ahajjamsara@gmail.com useSession.ts:110:13
+Next flow data: LogInFlow useSession.ts:131:15
+setupStatus: 
+Proxy { <target>: {…}, <handler>: {…} }
+useSession.ts:170:13
+store Grouped Permissions:  
+Proxy { <target>: (10) […], <handler>: {…} }
+useSession.ts:175:13
+Daily Activity Permission Type: none index.vue:67:15
+XHRGET
+http://localhost:3000/api/hub/hubFilter?issuerId=&startDate=09/10/2025 00:00:00&endDate=09/10/2025 23:59:59
+[HTTP/1.1 400 Bad Request 501ms]
+
+Data.value:  
+Proxy { <target>: {…}, <handler>: {…} }
+index.vue:171:15
+Data.value:  
+Proxy { <target>: {…}, <handler>: {…} }
+index.vue:171:15

