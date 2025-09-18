@@ -1,4 +1,4 @@
-# Level2 Buffer Overflow Walkthrough
+# Level2 Walkthrough
 ### Complete Step-by-Step Guide with Memory Layout Analysis
 
 ### 🎯 Objective

@@ -1,22 +1,29 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void run(void)
+void p(char *param_1, unsigned int m )
 {
-    fwrite("Good... Wait what?\n", 1, 19, stdout);
-    system("/bin/sh");
-    return;
+  m = printf(param_1);
+  return;
+}
+
+
+void n(void)
+{
+  char local_20c [520];
+  unsigned int m = 0;
+  
+  fgets(local_20c,0x200,stdin);
+  p(local_20c, m);
+  if (m == 0x1025544) {
+    system("/bin/cat /home/user/level5/.pass");
+  }
+  return;
 }
 
 void main(void)
 
 {
-    /*
-        sub $0x50, %esp      // Reserve 80 bytes on the stack for locals (including buffer + padding)
-        lea 0x10(%esp), %eax // Compute address of buffer: starts 16 bytes into that space
-        This means buffer size = 80 - 16 = 64 bytes
-    */
-    char local_50[64];
-    gets(local_50);
-    return;
+  n();
+  return;
 }

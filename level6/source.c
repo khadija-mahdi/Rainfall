@@ -1,22 +1,24 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-void run(void)
+ n()
 {
-    fwrite("Good... Wait what?\n", 1, 19, stdout);
-    system("/bin/sh");
+    system("/bin/cat /home/user/level7/.pass");
+    return ;
+}
+
+ m()
+{
+    puts("Nope");
     return;
 }
 
-void main(void)
-
+int main(int argc, char** argv, char** envp)
 {
-    /*
-        sub $0x50, %esp      // Reserve 80 bytes on the stack for locals (including buffer + padding)
-        lea 0x10(%esp), %eax // Compute address of buffer: starts 16 bytes into that space
-        This means buffer size = 80 - 16 = 64 bytes
-    */
-    char local_50[64];
-    gets(local_50);
-    return;
+    char* buffer = malloc(64);
+    int (** buffer_1)() = malloc(4);
+    *buffer_1 = m;
+    strcpy(buffer, argv[1]);
+    return (*buffer_1)();
 }

