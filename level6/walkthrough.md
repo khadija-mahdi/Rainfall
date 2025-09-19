@@ -13,18 +13,11 @@ Exploit a heap-based buffer overflow vulnerability to overwrite a function point
 
 ```bash
 level6@RainFall:~$ ls -la
-total 17
-dr-xr-x---+ 1 level6 level6   80 Mar  6  2016 .
-dr-x--x--x  1 root   root    340 Sep 23  2015 ..
--rw-r--r--  1 level6 level6  220 Apr  3  2012 .bash_logout
--rw-r--r--  1 level6 level6 3530 Sep  3  2015 .bashrc
--rw-r--r--  1 level6 level6  675 Apr  3  2012 .profile
 -rwsr-s---+ 1 level7 users  5274 Mar  6  2016 level6
 ```
 
 ### Key Observations:
 - **SUID Binary**: Owned by `level7` with setuid privileges
-- **File Size**: 5274 bytes - moderate complexity program
 - **Execution Context**: Runs with level7 user privileges
 
 ### Basic Functionality Test

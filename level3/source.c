@@ -3,9 +3,9 @@
 
 void v(unsigned int a0)
 {
-    char v0[520];
-    fgets(&v0, 0x200, stdin);
-    unsigned int m = printf(&v0);
+    char buffer[520];
+    fgets(&buffer, 0x200, stdin);
+    unsigned int m = printf(&buffer);
     a0 = m;
     if (a0 != 64)
         return;
@@ -16,8 +16,8 @@ void v(unsigned int a0)
 
 void main()
 {
-    char v0; 
+    char buffer; 
 
-    v(&v0);
+    v(&buffer);
     return;
 }
