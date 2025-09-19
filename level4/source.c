@@ -10,11 +10,11 @@ void p(char *param_1, unsigned int m )
 
 void n(void)
 {
-  char local_20c [520];
+  char buffer [520];
   unsigned int m = 0;
   
-  fgets(local_20c,0x200,stdin);
-  p(local_20c, m);
+  fgets(buffer,512,stdin);
+  p(buffer, m);
   if (m == 0x1025544) {
     system("/bin/cat /home/user/level5/.pass");
   }
@@ -22,7 +22,6 @@ void n(void)
 }
 
 void main(void)
-
 {
   n();
   return;

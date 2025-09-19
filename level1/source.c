@@ -11,7 +11,7 @@ void run(void)
 void main(void)
 
 {
-    char local_50[64];
-    gets(local_50);
+    char buffer[64];
+    gets(buffer);
     return;
 }

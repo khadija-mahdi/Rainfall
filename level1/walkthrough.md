@@ -357,34 +357,12 @@ python -c 'print "A"*76 + "\x44\x84\x04\x08"' | ./level1
 
 ### Why the Difference Matters:
 
-#### Without `cat` (Broken):
-```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   python    │───▶│   level1    │───▶│ system()    │
-│   payload   │    │  overflow   │    │ /bin/sh     │
-└─────────────┘    └─────────────┘    └─────────────┘
-                                            │
-                                            ▼
-                                     ┌─────────────┐
-                                     │stdin closed │
-                                     │shell exits  │
-                                     │immediately  │
-                                     └─────────────┘
-```
+### Why the Difference Matters
 
-#### With `cat` (Working):
-```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   python    │───▶│   level1    │───▶│ system()    │
-│   payload   │    │  overflow   │    │ /bin/sh     │
-└─────────────┘    └─────────────┘    └─────────────┘
-       │                                     │
-       ▼                                     ▼
-┌─────────────┐                       ┌─────────────┐
-│     cat     │──────stdin open────────▶│ Interactive │
-│  (waiting)  │                       │    shell    │
-└─────────────┘                       └─────────────┘
-```
+When you use only Python to send the payload, Python writes to stdin and then exits, closing the pipe. As a result, when `/bin/sh` is spawned by `system()`, its stdin is already closed, so the shell exits immediately—no interactive shell.
+
+By adding `cat` to the pipeline, `cat` keeps stdin open and forwards your input to the shell. This allows `/bin/sh` to remain interactive, giving you a working shell with elevated privileges.
+
 
 ### Successful Execution
 

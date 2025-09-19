@@ -1,7 +1,10 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/syscall.h>
+#include <string.h>
 
 int main(int argc, char *argv[]) {
 
@@ -17,8 +20,8 @@ int main(int argc, char *argv[]) {
         setresgid(egid, egid, egid);
 
         setresuid(euid, euid, euid);
-
-        char *args[] = { "/bin/sh", NULL };
+        char *shell = strdup("/bin/sh");
+        char *args[] = { shell, NULL };
         execv("/bin/sh", args);
 
     } else {

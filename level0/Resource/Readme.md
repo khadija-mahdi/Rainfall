@@ -1,0 +1,2 @@
+- [Dogbolt: Online Compiler Explorer](https://dogbolt.org)
+- [CTF 101: Binary Exploitation Overview](https://ctf101.org/binary-exploitation/overview/)
